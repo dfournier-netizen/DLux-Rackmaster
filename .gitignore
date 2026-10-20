@@ -1,0 +1,4 @@
+# Real show data stays off git. Tests that need it run locally only.
+*.dlux.json
+test_suite_v6.10/fixture_rackguide_allracks_real.html
+node_modules/

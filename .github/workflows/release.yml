@@ -1,0 +1,61 @@
+# Publishes the newest DLux_Rackmaster_YYYY-MM-DD_HHMMSS.html as
+# DLux-Rackmaster-<tag>.html on a GitHub Release when a v* tag is pushed
+# (e.g. v6.12.2). The jsdom suite must pass first. Pull requests that change
+# this file run the same checks without publishing.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths: ['.github/workflows/release.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Select newest build
+        run: |
+          BUILD=$(ls DLux_Rackmaster_20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9].html | sort | tail -n 1)
+          test -n "$BUILD"
+          echo "BUILD=$BUILD" >> "$GITHUB_ENV"
+          echo "Newest build: $BUILD"
+
+      # The suite was written against jsdom 29.1.1; jsdom 30 changes shadow-root focus behaviour.
+      - name: Install jsdom
+        run: |
+          npm install --prefix "$RUNNER_TEMP/deps" --no-audit --no-fund jsdom@29.1.1
+          echo "NODE_PATH=$RUNNER_TEMP/deps/node_modules" >> "$GITHUB_ENV"
+
+      # These two suites need the show file, which is kept off git. Run them locally.
+      - name: Test suite
+        run: |
+          SHOW_DATA_SUITES=" test_wire_shade_variation.js test_ylane_separation.js "
+          failed=0
+          for t in test_suite_v6.10/test_*.js; do
+            name=$(basename "$t")
+            if [[ "$SHOW_DATA_SUITES" == *" $name "* ]]; then echo "--- $name: skipped (needs show data)"; continue; fi
+            echo "--- $name"
+            node "$t" "$BUILD" || { echo "::error::$name failed"; failed=1; }
+          done
+          exit $failed
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp "$BUILD" "DLux-Rackmaster-$GITHUB_REF_NAME.html"
+          gh release create "$GITHUB_REF_NAME" "DLux-Rackmaster-$GITHUB_REF_NAME.html" \
+            --title "DLux Rackmaster $GITHUB_REF_NAME" \
+            --notes "Built from $BUILD." \
+            --verify-tag
